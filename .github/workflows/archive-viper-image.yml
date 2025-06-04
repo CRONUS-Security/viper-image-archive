@@ -1,0 +1,106 @@
+name: Archive Viper Docker Image # 工作流名称
+
+on:
+  schedule:
+    # 每天北京时间上午 8 点和晚上 8 点运行
+    # GitHub Actions 的 cron 表达式使用 UTC 时间。
+    # 新加坡时间 (SGT) 是 UTC+8。
+    # 12:00 PM SGT = 04:00 AM UTC
+    # 12:00 AM SGT = 16:00 PM UTC (前一天的 12 AM UTC)
+    # 所以为了在新加坡时间每天 12:00 PM 和 12:00 AM 运行，我们设置为 4:00 AM UTC 和 4:00 PM UTC。
+    - cron: '0 4,16 * * *'
+  workflow_dispatch:
+    # 允许在 GitHub UI 中手动触发此工作流
+
+env:
+  DOCKERHUB_IMAGE: viperplatform/viper:latest # 要存档的 DockerHub 镜像
+  GHCR_REPOSITORY: ghcr.io/${{ github.repository }} # GitHub 容器注册表路径，例如：ghcr.io/你的用户名/你的仓库名
+
+jobs:
+  archive-image:
+    runs-on: ubuntu-latest # 在 Ubuntu 最新版本上运行
+    permissions:
+      contents: write # 需要写入权限来更新 archived_hashes.txt 文件
+      packages: write # 需要推送镜像到 GHCR 的权限
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 获取 DockerHub 镜像摘要 (Hash)
+        id: get_digest # 步骤 ID，用于引用其输出
+        run: |
+          # 使用 skopeo 获取 manifest 摘要 (哈希)
+          # skopeo 通常在 ubuntu-latest runner 上已安装
+          # 我们使用 "inspect --format='{{.Digest}}'" 只获取摘要
+          IMAGE_DIGEST=$(skopeo inspect docker://${{ env.DOCKERHUB_IMAGE }} --format='{{.Digest}}')
+          echo "DockerHub 镜像摘要: $IMAGE_DIGEST"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT" # 设置输出变量
+
+      - name: 读取已存档的哈希列表
+        id: read_hashes
+        run: |
+          ARCHIVED_HASHES_FILE="archived_hashes.txt"
+          if [ -f "$ARCHIVED_HASHES_FILE" ]; then
+            ARCHIVED_HASHES=$(cat "$ARCHIVED_HASHES_FILE")
+            echo "已存档的哈希:"
+            echo "$ARCHIVED_HASHES"
+            echo "ARCHIVED_HASHES=$ARCHIVED_HASHES" >> "$GITHUB_OUTPUT"
+          else
+            echo "未找到之前存档的哈希文件。"
+            echo "ARCHIVED_HASHES=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 检查镜像是否已存档
+        id: check_archived
+        run: |
+          CURRENT_DIGEST="${{ steps.get_digest.outputs.IMAGE_DIGEST }}"
+          ARCHIVED_HASHES="${{ steps.read_hashes.outputs.ARCHIVED_HASHES }}"
+
+          if echo "$ARCHIVED_HASHES" | grep -q "$CURRENT_DIGEST"; then
+            echo "镜像摘要 $CURRENT_DIGEST 已存档。跳过。"
+            echo "IS_ARCHIVED=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "镜像摘要 $CURRENT_DIGEST 是新发现的。正在存档..."
+            echo "IS_ARCHIVED=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 存档新镜像
+        if: steps.check_archived.outputs.IS_ARCHIVED == 'false' # 仅当镜像未存档时运行此步骤
+        run: |
+          IMAGE_DIGEST="${{ steps.get_digest.outputs.IMAGE_DIGEST }}"
+          TIMESTAMP=$(date -u +'%Y%m%d%H%M%S') # UTC 时间戳，用于标签
+
+          # 登录到 GHCR
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # 从 DockerHub 拉取镜像
+          docker pull ${{ env.DOCKERHUB_IMAGE }}
+
+          # 为 GHCR 镜像打标签。使用摘要作为标签的一部分，确保唯一性和可追溯性。
+          # 也可以选择只使用时间戳作为标签，但包含摘要更可靠。
+          # 例如，sha256:abcdef... 会被简化为 abcdef...
+          GHCR_TAG="${GHCR_REPOSITORY}:${TIMESTAMP}-${IMAGE_DIGEST##*:}"
+          docker tag ${{ env.DOCKERHUB_IMAGE }} "${GHCR_TAG}"
+
+          # 将镜像推送到 GHCR
+          docker push "${GHCR_TAG}"
+
+          echo "成功存档镜像到: ${GHCR_TAG}"
+          echo "ARCHIVED_TAG=${GHCR_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: 更新已存档的哈希文件
+        if: steps.check_archived.outputs.IS_ARCHIVED == 'false' # 仅当有新镜像存档时才更新文件
+        run: |
+          ARCHIVED_HASHES_FILE="archived_hashes.txt"
+          CURRENT_DIGEST="${{ steps.get_digest.outputs.IMAGE_DIGEST }}"
+
+          # 将新的摘要追加到文件末尾
+          echo "$CURRENT_DIGEST" >> "$ARCHIVED_HASHES_FILE"
+
+          # 配置 Git 用户信息并提交更新
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add "$ARCHIVED_HASHES_FILE"
+          git commit -m "Archive: 添加 DockerHub 镜像摘要 $CURRENT_DIGEST"
+          git push
