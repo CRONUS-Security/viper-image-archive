@@ -14,7 +14,7 @@ on:
 
 env:
   DOCKERHUB_IMAGE: viperplatform/viper:latest # 要存档的 DockerHub 镜像
-  GHCR_REPOSITORY: ghcr.io/${{ lower(github.repository) }} # GitHub 容器注册表路径，例如：ghcr.io/你的用户名/你的仓库名
+  GHCR_REPOSITORY: ghcr.io/${{ github.repository }} # GitHub 容器注册表路径，例如：ghcr.io/你的用户名/你的仓库名
 
 jobs:
   archive-image:
@@ -26,6 +26,15 @@ jobs:
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
+
+      - name: 转换仓库路径为小写
+        id: convert-repository
+        run: |
+          # 提取仓库路径并转换为小写
+          REPO_NAME="${{ github.repository }}"
+          LOWER_REPO_NAME=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
+          echo "小写的仓库路径: $LOWER_REPO_NAME"
+          echo "GHCR_REPOSITORY=ghcr.io/$LOWER_REPO_NAME" >> $GITHUB_ENV
 
       - name: 获取 DockerHub 镜像摘要 (Hash)
         id: get_digest # 步骤 ID，用于引用其输出
