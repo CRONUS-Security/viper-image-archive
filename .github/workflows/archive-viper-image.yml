@@ -54,7 +54,12 @@ jobs:
             ARCHIVED_HASHES=$(cat "$ARCHIVED_HASHES_FILE")
             echo "已存档的哈希:"
             echo "$ARCHIVED_HASHES"
-            echo "ARCHIVED_HASHES=$ARCHIVED_HASHES" >> "$GITHUB_OUTPUT"
+            echo "$ARCHIVED_HASHES"
+            {
+              echo 'ARCHIVED_HASHES<<EOF'
+              echo "$ARCHIVED_HASHES"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
           else
             echo "未找到之前存档的哈希文件。"
             echo "ARCHIVED_HASHES=" >> "$GITHUB_OUTPUT"
