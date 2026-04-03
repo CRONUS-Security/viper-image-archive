@@ -108,8 +108,8 @@ jobs:
           TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
           # 移除旧的最后更新时间行（如果存在），然后追加新的
           sed -i '/^最后更新时间:/d' README.md
-          # 移除文件末尾多余的空行后再追加，保持格式整洁
-          sed -i -e '/^$/d' README.md
+          # 仅移除文件末尾连续空行，保留正文中的空行，避免破坏 Markdown 排版
+          perl -0pi -e 's/(?:\r?\n[ \t]*)+\z/\n/' README.md
           echo "" >> README.md
           echo "最后更新时间: $TIMESTAMP" >> README.md
           echo "README.md 已更新，最后更新时间: $TIMESTAMP"
