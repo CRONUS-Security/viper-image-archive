@@ -103,6 +103,17 @@ jobs:
           echo "成功存档镜像到: ${GHCR_TAG}"
           echo "ARCHIVED_TAG=${GHCR_TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: 更新 README 最后运行时间
+        run: |
+          TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          # 移除旧的最后更新时间行（如果存在），然后追加新的
+          sed -i '/^最后更新时间:/d' README.md
+          # 仅移除文件末尾连续空行，保留正文中的空行，避免破坏 Markdown 排版
+          perl -0pi -e 's/(?:\r?\n[ \t]*)+\z/\n/' README.md
+          echo "" >> README.md
+          echo "最后更新时间: $TIMESTAMP" >> README.md
+          echo "README.md 已更新，最后更新时间: $TIMESTAMP"
+
       - name: 更新已存档的哈希文件
         if: steps.check_archived.outputs.IS_ARCHIVED == 'false' # 仅当有新镜像存档时才更新文件
         run: |
@@ -112,9 +123,18 @@ jobs:
           # 将新的摘要追加到文件末尾
           echo "$CURRENT_DIGEST" >> "$ARCHIVED_HASHES_FILE"
 
-          # 配置 Git 用户信息并提交更新
+          # 配置 Git 用户信息并提交更新（同时提交 README.md）
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add "$ARCHIVED_HASHES_FILE"
+          git add "$ARCHIVED_HASHES_FILE" README.md
           git commit -m "Archive: 添加 DockerHub 镜像摘要 $CURRENT_DIGEST"
+          git push
+
+      - name: 提交 README 更新（镜像已存档时）
+        if: steps.check_archived.outputs.IS_ARCHIVED == 'true' # 仅当镜像已存档（无需推送新镜像）时运行
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add README.md
+          git commit -m "Update: 更新 README 最后运行时间"
           git push
